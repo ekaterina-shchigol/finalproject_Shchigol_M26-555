@@ -14,3 +14,8 @@ wheels/
 logs/
 
 .ruff_cache/
+
+# Данные, создаваемые приложением
+data/users.json
+data/portfolios.json
+data/rates.json
