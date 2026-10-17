@@ -1,5 +1,7 @@
 import shlex
 
+from valutatrade_hub.core.currencies import CURRENCY_REGISTRY
+from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
 from valutatrade_hub.core.usecases import (
     buy,
     get_portfolio_values,
@@ -94,6 +96,9 @@ def run_cli() -> None:
 
                 base = options.get("--base", "USD").strip().upper()
                 rows, total = get_portfolio_values(current_user, base)
+            except ApiRequestError as error:
+                print(f"Ошибка: {error}")
+                print("Попробуйте обновить курсы позже или проверьте сеть")
             except (TypeError, ValueError) as error:
                 print(f"Ошибка: {error}")
             else:
@@ -122,6 +127,12 @@ def run_cli() -> None:
                 before, after, estimated = buy(
                     current_user, options["--currency"], amount
                 )
+            except CurrencyNotFoundError as error:
+                print(f"Ошибка: {error}")
+                print(f"Доступные валюты: {', '.join(CURRENCY_REGISTRY)}")
+            except ApiRequestError as error:
+                print(f"Ошибка: {error}")
+                print("Попробуйте обновить курсы позже или проверьте сеть")
             except (TypeError, ValueError) as error:
                 print(f"Ошибка: {error}")
             else:
@@ -147,6 +158,12 @@ def run_cli() -> None:
                 before, after, estimated = sell(
                     current_user, options["--currency"], amount
                 )
+            except CurrencyNotFoundError as error:
+                print(f"Ошибка: {error}")
+                print(f"Доступные валюты: {', '.join(CURRENCY_REGISTRY)}")
+            except ApiRequestError as error:
+                print(f"Ошибка: {error}")
+                print("Попробуйте обновить курсы позже или проверьте сеть")
             except (TypeError, ValueError) as error:
                 print(f"Ошибка: {error}")
             else:
@@ -166,12 +183,20 @@ def run_cli() -> None:
 
                 source = options["--from"].strip().upper()
                 target = options["--to"].strip().upper()
-                rate, reverse_rate = get_rate(source, target)
+                rate, reverse_rate, updated_at = get_rate(source, target)
+            except CurrencyNotFoundError as error:
+                print(f"Ошибка: {error}")
+                print(f"Доступные валюты: {', '.join(CURRENCY_REGISTRY)}")
+            except ApiRequestError as error:
+                print(f"Ошибка: {error}")
+                print("Попробуйте обновить курсы позже или проверьте сеть")
             except (TypeError, ValueError) as error:
                 print(f"Ошибка: {error}")
             else:
-                print(f"Учебный курс {source} → {target}: {rate:.8f}")
+                print(f"Курс {source} → {target}: {rate:.8f}")
                 print(f"Обратный курс {target} → {source}: {reverse_rate:.8f}")
+                if updated_at is not None:
+                    print(f"Обновлено: {updated_at}")
             continue
 
         print(f"Неизвестная команда: {command}")

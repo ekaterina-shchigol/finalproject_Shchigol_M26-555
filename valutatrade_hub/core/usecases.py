@@ -2,8 +2,12 @@ import hashlib
 import secrets
 from datetime import UTC, datetime
 
+from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.models import Portfolio, User, Wallet
-from valutatrade_hub.core.utils import get_demo_rate
+from valutatrade_hub.core.utils import get_current_rate
+from valutatrade_hub.decorators import log_action
+from valutatrade_hub.infra.database import DatabaseManager
 from valutatrade_hub.infra.storage import (
     load_portfolios,
     load_users,
@@ -12,11 +16,27 @@ from valutatrade_hub.infra.storage import (
 )
 
 
-def get_rate(from_currency: str, to_currency: str) -> tuple[float, float]:
-    """Вернуть учебный курс и обратный курс."""
-    rate = get_demo_rate(from_currency, to_currency)
-    reverse_rate = get_demo_rate(to_currency, from_currency)
-    return rate, reverse_rate
+def get_rate(
+    from_currency: str,
+    to_currency: str,
+) -> tuple[float, float, str | None]:
+    """Вернуть курс, обратный курс и время обновления кэша."""
+    source = get_currency(from_currency).code
+    target = get_currency(to_currency).code
+    rate = get_current_rate(source, target)
+
+    cache = DatabaseManager().read_object("rates_file")
+    if not cache:
+        return rate, 1 / rate, None
+
+    pairs = cache.get("pairs", {})
+    timestamps = [
+        pairs[f"{code}_USD"]["updated_at"]
+        for code in (source, target)
+        if code != "USD"
+    ]
+    updated_at = min(timestamps) if timestamps else cache.get("last_refresh")
+    return rate, 1 / rate, updated_at
 
 def register(username: str, password: str) -> User:
     """Зарегистрировать пользователя и создать ему пустой портфель."""
@@ -106,11 +126,12 @@ def get_portfolio_values(
     return rows, total
 
 
+@log_action("BUY", verbose=True)
 def buy(user: User, currency_code: str, amount: float) -> tuple[float, float, float]:
     """Купить валюту и сохранить новый баланс кошелька."""
-    purchase = Wallet(currency_code)
+    code = get_currency(currency_code).code
+    purchase = Wallet(code)
     purchase.deposit(amount)
-    code = purchase.currency_code
 
     estimated_usd = Portfolio(user, {code: purchase}).get_total_value("USD")
 
@@ -133,11 +154,12 @@ def buy(user: User, currency_code: str, amount: float) -> tuple[float, float, fl
     raise ValueError(f"Портфель пользователя '{user.username}' не найден")
 
 
+@log_action("SELL", verbose=True)
 def sell(user: User, currency_code: str, amount: float) -> tuple[float, float, float]:
     """Продать валюту и сохранить новый баланс кошелька."""
-    sale = Wallet(currency_code)
+    code = get_currency(currency_code).code
+    sale = Wallet(code)
     sale.deposit(amount)
-    code = sale.currency_code
 
     portfolio = get_portfolio(user)
     if code not in portfolio.wallets:
@@ -145,10 +167,7 @@ def sell(user: User, currency_code: str, amount: float) -> tuple[float, float, f
 
     wallet = portfolio.get_wallet(code)
     if amount > wallet.balance:
-        raise ValueError(
-            f"Недостаточно средств: доступно {wallet.balance:.4f} {code}, "
-            f"требуется {amount:.4f} {code}"
-        )
+        raise InsufficientFundsError(wallet.balance, amount, code)
 
     estimated_usd = Portfolio(user, {code: sale}).get_total_value("USD")
     previous_balance = wallet.balance

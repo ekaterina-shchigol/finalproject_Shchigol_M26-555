@@ -2,7 +2,8 @@ import hashlib
 from datetime import datetime
 from math import isfinite
 
-from valutatrade_hub.core.utils import DEMO_USD_RATES
+from valutatrade_hub.core.exceptions import InsufficientFundsError
+from valutatrade_hub.core.utils import get_current_rate
 
 
 class Wallet:
@@ -46,7 +47,7 @@ class Wallet:
         if not isfinite(amount) or amount <= 0:
             raise ValueError("Сумма списания должна быть положительным числом")
         if amount > self.balance:
-            raise ValueError("Недостаточно средств на балансе")
+            raise InsufficientFundsError(self.balance, amount, self.currency_code)
 
         self.balance = self.balance - amount
 
@@ -197,23 +198,26 @@ class Portfolio:
         exchange_rates: dict[str, float] | None = None,
     ) -> float:
         """Посчитать стоимость портфеля в базовой валюте."""
-        rates = (
-            exchange_rates
-            if exchange_rates is not None
-            else DEMO_USD_RATES
-        )
-
         if not isinstance(base_currency, str) or not base_currency.strip():
             raise ValueError("Базовая валюта не может быть пустой")
 
         base_code = base_currency.strip().upper()
-        if base_code not in rates:
+
+        if exchange_rates is None:
+            get_current_rate(base_code, base_code)
+            return sum(
+                wallet.balance
+                * get_current_rate(wallet.currency_code, base_code)
+                for wallet in self._wallets.values()
+            )
+
+        if base_code not in exchange_rates:
             raise ValueError(f"Неизвестная базовая валюта '{base_code}'")
 
         total_usd = 0.0
         for wallet in self._wallets.values():
-            if wallet.currency_code not in rates:
+            if wallet.currency_code not in exchange_rates:
                 raise ValueError(f"Нет курса для '{wallet.currency_code}'")
-            total_usd += wallet.balance * rates[wallet.currency_code]
+            total_usd += wallet.balance * exchange_rates[wallet.currency_code]
 
-        return total_usd / rates[base_code]
+        return total_usd / exchange_rates[base_code]
