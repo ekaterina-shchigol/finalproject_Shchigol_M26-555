@@ -25,8 +25,7 @@ class CoinGeckoClient(BaseApiClient):
     def fetch_rates(self) -> dict[str, dict]:
         """Получить курсы криптовалют к базовой валюте."""
         coin_ids = [
-            self.config.crypto_id_map[code]
-            for code in self.config.crypto_currencies
+            self.config.crypto_id_map[code] for code in self.config.crypto_currencies
         ]
         params = {
             "ids": ",".join(coin_ids),
@@ -60,6 +59,8 @@ class CoinGeckoClient(BaseApiClient):
 
         rates = {}
         base = self.config.base_currency.upper()
+        fetched_at = datetime.now(UTC).isoformat()
+
         for code in self.config.crypto_currencies:
             coin_id = self.config.crypto_id_map[code]
             coin_data = data.get(coin_id)
@@ -75,19 +76,25 @@ class CoinGeckoClient(BaseApiClient):
             ):
                 raise ApiRequestError(f"CoinGecko: неверный курс для {code}")
 
-            updated_unix = coin_data.get("last_updated_at")
-            if isinstance(updated_unix, (int, float)) and updated_unix > 0:
-                updated_at = datetime.fromtimestamp(
-                    updated_unix, UTC
+            source_updated_unix = coin_data.get("last_updated_at")
+            source_updated_at = None
+            if (
+                not isinstance(source_updated_unix, bool)
+                and isinstance(source_updated_unix, (int, float))
+                and source_updated_unix > 0
+            ):
+                source_updated_at = datetime.fromtimestamp(
+                    source_updated_unix, UTC
                 ).isoformat()
-            else:
-                updated_at = datetime.now(UTC).isoformat()
 
             rates[f"{code}_{base}"] = {
                 "rate": float(rate),
-                "updated_at": updated_at,
+                "updated_at": fetched_at,
                 "source": "CoinGecko",
-                "meta": {"raw_id": coin_id},
+                "meta": {
+                    "raw_id": coin_id,
+                    "source_updated_at": source_updated_at,
+                },
             }
 
         return rates
@@ -103,9 +110,7 @@ class ExchangeRateApiClient(BaseApiClient):
         """Получить курсы фиатных валют к базовой валюте."""
         api_key = self.config.exchangerate_api_key
         if not api_key:
-            raise ApiRequestError(
-                "ExchangeRate-API: не задан EXCHANGERATE_API_KEY"
-            )
+            raise ApiRequestError("ExchangeRate-API: не задан EXCHANGERATE_API_KEY")
 
         base = self.config.base_currency.upper()
         url = f"{self.config.exchangerate_api_url}/{api_key}/latest/{base}"
@@ -116,20 +121,15 @@ class ExchangeRateApiClient(BaseApiClient):
                 timeout=self.config.request_timeout,
             )
             if response.status_code == 429:
-                raise ApiRequestError(
-                    "ExchangeRate-API: превышен лимит запросов"
-                )
+                raise ApiRequestError("ExchangeRate-API: превышен лимит запросов")
             if response.status_code in (401, 403):
-                raise ApiRequestError(
-                    "ExchangeRate-API: проверьте API-ключ"
-                )
+                raise ApiRequestError("ExchangeRate-API: проверьте API-ключ")
             response.raise_for_status()
             data = response.json()
         except requests.exceptions.RequestException as error:
-            # Не включаем текст сетевой ошибки: в URL находится API-ключ.
+            # В URL находится ключ, поэтому текст сетевой ошибки не показываем.
             raise ApiRequestError(
-                f"ExchangeRate-API: ошибка сети или HTTP "
-                f"({type(error).__name__})"
+                f"ExchangeRate-API: ошибка сети или HTTP ({type(error).__name__})"
             ) from error
         except ValueError as error:
             raise ApiRequestError(
@@ -137,27 +137,25 @@ class ExchangeRateApiClient(BaseApiClient):
             ) from error
 
         if not isinstance(data, dict) or data.get("result") != "success":
-            raise ApiRequestError(
-                "ExchangeRate-API: сервис не вернул успешный ответ"
-            )
+            raise ApiRequestError("ExchangeRate-API: сервис не вернул успешный ответ")
         if data.get("base_code") != base:
-            raise ApiRequestError(
-                "ExchangeRate-API: неверная базовая валюта в ответе"
-            )
+            raise ApiRequestError("ExchangeRate-API: неверная базовая валюта в ответе")
 
         conversion_rates = data.get("conversion_rates")
         if not isinstance(conversion_rates, dict):
-            raise ApiRequestError(
-                "ExchangeRate-API: в ответе нет словаря курсов"
-            )
+            raise ApiRequestError("ExchangeRate-API: в ответе нет словаря курсов")
 
-        updated_unix = data.get("time_last_update_unix")
-        if isinstance(updated_unix, (int, float)) and updated_unix > 0:
-            updated_at = datetime.fromtimestamp(
-                updated_unix, UTC
+        fetched_at = datetime.now(UTC).isoformat()
+        source_updated_unix = data.get("time_last_update_unix")
+        source_updated_at = None
+        if (
+            not isinstance(source_updated_unix, bool)
+            and isinstance(source_updated_unix, (int, float))
+            and source_updated_unix > 0
+        ):
+            source_updated_at = datetime.fromtimestamp(
+                source_updated_unix, UTC
             ).isoformat()
-        else:
-            updated_at = datetime.now(UTC).isoformat()
 
         rates = {}
         for code in self.config.fiat_currencies:
@@ -168,16 +166,14 @@ class ExchangeRateApiClient(BaseApiClient):
                 or not isfinite(direct_rate)
                 or direct_rate <= 0
             ):
-                raise ApiRequestError(
-                    f"ExchangeRate-API: неверный курс для {code}"
-                )
+                raise ApiRequestError(f"ExchangeRate-API: неверный курс для {code}")
 
             # Ответ latest/USD содержит USD → EUR; нам нужен EUR → USD.
             rates[f"{code}_{base}"] = {
                 "rate": 1 / direct_rate,
-                "updated_at": updated_at,
+                "updated_at": fetched_at,
                 "source": "ExchangeRate-API",
-                "meta": {},
+                "meta": {"source_updated_at": source_updated_at},
             }
 
         return rates
