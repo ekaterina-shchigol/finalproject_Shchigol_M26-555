@@ -132,13 +132,20 @@ def get_portfolio_values(
     base_currency: str = "USD",
 ) -> tuple[list[tuple[str, float, float]], float]:
     """Вернуть балансы, их стоимость и общий итог."""
+    try:
+        base_code = get_currency(base_currency).code
+    except ValueError as error:
+        raise ValueError(
+            f"Неизвестная базовая валюта '{base_currency}'"
+        ) from error
+
     portfolio = get_portfolio(user)
-    total = portfolio.get_total_value(base_currency)
+    total = portfolio.get_total_value(base_code)
     rows = []
 
     for code, wallet in sorted(portfolio.wallets.items()):
         one_wallet = Portfolio(user, {code: wallet})
-        value = one_wallet.get_total_value(base_currency)
+        value = one_wallet.get_total_value(base_code)
         rows.append((code, wallet.balance, value))
 
     return rows, total

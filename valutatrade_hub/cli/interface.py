@@ -11,6 +11,7 @@ from valutatrade_hub.core.usecases import (
     register,
     sell,
 )
+from valutatrade_hub.logging_config import parser_console_logging
 from valutatrade_hub.parser_service.api_clients import (
     CoinGeckoClient,
     ExchangeRateApiClient,
@@ -81,8 +82,8 @@ def run_cli() -> None:
                 }
                 updater = RatesUpdater(clients, RatesStorage())
 
-                print("Начинаю обновление курсов...")
-                result = updater.run_update(source)
+                with parser_console_logging():
+                    result = updater.run_update(source)
             except ApiRequestError as error:
                 print(f"Ошибка: {error}")
                 print("Повторите позже или проверьте сеть и API-ключ.")

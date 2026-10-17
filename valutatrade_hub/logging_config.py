@@ -1,4 +1,7 @@
 import logging
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -37,7 +40,7 @@ def configure_logging(debug: bool = False) -> logging.Logger:
 
 
 def configure_parser_logging(debug: bool = False) -> logging.Logger:
-    """Настроить отдельный журнал Parser Service с ротацией."""
+    """Настроить файловый журнал Parser Service с ротацией."""
     log_path = Path(__file__).resolve().parents[1] / "logs/parser.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -61,3 +64,19 @@ def configure_parser_logging(debug: bool = False) -> logging.Logger:
         logger.addHandler(handler)
 
     return logger
+
+
+@contextmanager
+def parser_console_logging() -> Iterator[None]:
+    """Показывать логи парсера в консоли только внутри команды update-rates."""
+    logger = configure_parser_logging()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logger.addHandler(handler)
+
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
