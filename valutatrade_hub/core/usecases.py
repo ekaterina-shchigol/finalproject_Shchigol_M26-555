@@ -3,7 +3,7 @@ import secrets
 from datetime import UTC, datetime
 
 from valutatrade_hub.core.currencies import get_currency
-from valutatrade_hub.core.exceptions import InsufficientFundsError
+from valutatrade_hub.core.exceptions import ApiRequestError, InsufficientFundsError
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import get_current_rate
 from valutatrade_hub.decorators import log_action
@@ -20,10 +20,29 @@ def get_rate(
     from_currency: str,
     to_currency: str,
 ) -> tuple[float, float, str | None]:
-    """Вернуть курс, обратный курс и время обновления кэша."""
+    """Вернуть курс и при необходимости обновить устаревший кэш."""
     source = get_currency(from_currency).code
     target = get_currency(to_currency).code
-    rate = get_current_rate(source, target)
+
+    try:
+        rate = get_current_rate(source, target)
+    except ApiRequestError:
+        from valutatrade_hub.parser_service.api_clients import (
+            CoinGeckoClient,
+            ExchangeRateApiClient,
+        )
+        from valutatrade_hub.parser_service.config import ParserConfig
+        from valutatrade_hub.parser_service.storage import RatesStorage
+        from valutatrade_hub.parser_service.updater import RatesUpdater
+
+        config = ParserConfig()
+        clients = {
+            "coingecko": CoinGeckoClient(config),
+            "exchangerate": ExchangeRateApiClient(config),
+        }
+        updater = RatesUpdater(clients, RatesStorage())
+        updater.run_update()
+        rate = get_current_rate(source, target)
 
     cache = DatabaseManager().read_object("rates_file")
     if not cache:
@@ -31,12 +50,11 @@ def get_rate(
 
     pairs = cache.get("pairs", {})
     timestamps = [
-        pairs[f"{code}_USD"]["updated_at"]
-        for code in (source, target)
-        if code != "USD"
+        pairs[f"{code}_USD"]["updated_at"] for code in (source, target) if code != "USD"
     ]
     updated_at = min(timestamps) if timestamps else cache.get("last_refresh")
     return rate, 1 / rate, updated_at
+
 
 def register(username: str, password: str) -> User:
     """Зарегистрировать пользователя и создать ему пустой портфель."""
@@ -53,19 +71,19 @@ def register(username: str, password: str) -> User:
 
     user_id = max((item["user_id"] for item in users), default=0) + 1
     salt = secrets.token_hex(16)
-    hashed_password = hashlib.sha256(
-        (password + salt).encode("utf-8")
-    ).hexdigest()
+    hashed_password = hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
     registration_date = datetime.now(UTC)
 
     user = User(user_id, username, hashed_password, salt, registration_date)
-    users.append({
-        "user_id": user.user_id,
-        "username": user.username,
-        "hashed_password": user.hashed_password,
-        "salt": user.salt,
-        "registration_date": user.registration_date.isoformat(),
-    })
+    users.append(
+        {
+            "user_id": user.user_id,
+            "username": user.username,
+            "hashed_password": user.hashed_password,
+            "salt": user.salt,
+            "registration_date": user.registration_date.isoformat(),
+        }
+    )
 
     portfolios = load_portfolios()
     portfolios.append({"user_id": user.user_id, "wallets": {}})

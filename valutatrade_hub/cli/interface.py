@@ -1,5 +1,6 @@
 import shlex
 
+from valutatrade_hub.cli.rates_commands import show_rates
 from valutatrade_hub.core.currencies import CURRENCY_REGISTRY
 from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
 from valutatrade_hub.core.usecases import (
@@ -10,6 +11,13 @@ from valutatrade_hub.core.usecases import (
     register,
     sell,
 )
+from valutatrade_hub.parser_service.api_clients import (
+    CoinGeckoClient,
+    ExchangeRateApiClient,
+)
+from valutatrade_hub.parser_service.config import ParserConfig
+from valutatrade_hub.parser_service.storage import RatesStorage
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 
 def _parse_options(arguments: list[str]) -> dict[str, str]:
@@ -52,7 +60,61 @@ def run_cli() -> None:
         if command == "exit":
             print("До свидания!")
             break
-        
+
+        if command == "update-rates":
+            try:
+                options = _parse_options(parts[1:])
+                if set(options) - {"--source"}:
+                    raise ValueError(
+                        "Используйте: update-rates "
+                        "[--source coingecko|exchangerate]"
+                    )
+
+                source = options.get("--source")
+                if source is not None:
+                    source = source.strip().lower()
+
+                config = ParserConfig()
+                clients = {
+                    "coingecko": CoinGeckoClient(config),
+                    "exchangerate": ExchangeRateApiClient(config),
+                }
+                updater = RatesUpdater(clients, RatesStorage())
+
+                print("Начинаю обновление курсов...")
+                result = updater.run_update(source)
+            except ApiRequestError as error:
+                print(f"Ошибка: {error}")
+                print("Повторите позже или проверьте сеть и API-ключ.")
+            except ValueError as error:
+                print(f"Ошибка: {error}")
+            else:
+                print(
+                    f"Обновление завершено. Получено курсов: "
+                    f"{result['fetched']}; обновлено в кэше: "
+                    f"{result['updated']}."
+                )
+                print(f"Время обновления: {result['last_refresh']}")
+                if result["errors"]:
+                    print("Некоторые источники не ответили:")
+                    for name, message in result["errors"].items():
+                        print(f"- {name}: {message}")
+                    print("Подробности: logs/parser.log")
+            continue
+
+        if command == "show-rates":
+            try:
+                options = _parse_options(parts[1:])
+                show_rates(options)
+            except CurrencyNotFoundError as error:
+                print(f"Ошибка: {error}")
+                print(f"Доступные валюты: {', '.join(CURRENCY_REGISTRY)}")
+            except ApiRequestError as error:
+                print(f"Ошибка: {error}")
+            except (TypeError, ValueError) as error:
+                print(f"Ошибка: {error}")
+            continue
+
         if command == "register":
             try:
                 options = _parse_options(parts[1:])
@@ -110,7 +172,7 @@ def run_cli() -> None:
                         print(f"- {code}: {balance:.4f} → {value:.2f} {base}")
                 print(f"ИТОГО: {total:.2f} {base}")
             continue
-        
+
         if command == "buy":
             if current_user is None:
                 print("Сначала выполните login")

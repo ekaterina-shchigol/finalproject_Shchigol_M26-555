@@ -8,9 +8,11 @@ from valutatrade_hub.infra.settings import SettingsLoader
 DEMO_USD_RATES = {
     "USD": 1.0,
     "EUR": 1.07,
-    "BTC": 59300.0,
+    "GBP": 1.25,
     "RUB": 0.01016,
+    "BTC": 59300.0,
     "ETH": 3720.0,
+    "SOL": 145.0,
 }
 
 

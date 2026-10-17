@@ -74,3 +74,27 @@ class DatabaseManager:
             os.replace(temporary_path, path)
         finally:
             temporary_path.unlink(missing_ok=True)
+
+    def write_object(self, setting_name: str, data: dict) -> None:
+        """Атомарно сохранить JSON-объект."""
+        if not isinstance(data, dict):
+            raise TypeError("Данные для сохранения должны быть объектом")
+
+        path = self.path_for(setting_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary_file:
+            temporary_file.write(content)
+            temporary_path = Path(temporary_file.name)
+
+        try:
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
